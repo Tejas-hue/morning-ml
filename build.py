@@ -287,22 +287,35 @@ def main():
     fin_html = "\n".join(cluster_block(cl) for cl in fin_clusters) or \
         '<p class="empty">No finance news fetched — check the Actions log.</p>'
 
-    # world grouped by region, each region clustered
+    # world grouped by region, each region clustered and individually toggleable
+    def slug(name):
+        return re.sub(r"[^a-z]+", "-", name.lower()).strip("-")
+
     world_html_parts = []
-    counts = {}
+    chips = []
     for region in C.REGION_ORDER:
         reg_items = [i for i in world if i["region"] == region]
-        counts[region] = len(reg_items)
         if not reg_items:
             continue
+        sl = slug(region)
         cls = cluster(reg_items)
         blocks = "\n".join(cluster_block(cl) for cl in cls)
-        rid = "region-" + re.sub(r"[^a-z]+", "-", region.lower())
+        # each region is a labelled block that JS can show/hide by its data-region
         world_html_parts.append(
-            f'<div class="section-head"><h2>{esc(region)}</h2>'
+            f'<div class="region" data-region="{sl}">\n'
+            f'  <div class="section-head"><h2>{esc(region)}</h2>'
             f'<span class="count">{len(reg_items)}</span></div>\n'
-            f'<div id="{rid}">{blocks}</div>')
-    world_html = "\n".join(world_html_parts) or \
+            f'  <div id="region-{sl}">{blocks}</div>\n'
+            f'</div>')
+        chips.append(
+            f'<button class="chip" data-region="{sl}" aria-pressed="true">'
+            f'{esc(region)}</button>')
+    chip_bar = ('<div class="chips" id="country-chips">'
+                + "\n".join(chips)
+                + '<button class="chip chip-all" data-all="1">All</button>'
+                + '<button class="chip chip-none" data-none="1">None</button>'
+                + '</div>') if chips else ""
+    world_html = (chip_bar + "\n" + "\n".join(world_html_parts)) if world_html_parts else \
         '<p class="empty">No world news fetched — check the Actions log.</p>'
 
     stamp = NOW.strftime("%A, %d %B %Y · %H:%M UTC")
@@ -416,6 +429,15 @@ TEMPLATE = r"""<!DOCTYPE html>
   #news .card {{ padding-left:14px; border-left:2px solid transparent; }}
   #news .card:hover {{ border-left-color:var(--news); }}
   .empty {{ color:var(--faint); font-style:italic; }}
+  .chips {{ display:flex; flex-wrap:wrap; gap:7px; margin:6px 0 4px; }}
+  .chip {{ padding:6px 12px; border:1px solid var(--line); background:var(--panel);
+    color:var(--soft); border-radius:20px; font-size:.8rem; font-weight:600;
+    cursor:pointer; }}
+  .chip[aria-pressed="true"] {{ border-color:var(--accent); color:var(--accent);
+    background:var(--accent-soft); }}
+  .chip-all, .chip-none {{ color:var(--faint); font-family:var(--mono);
+    font-size:.72rem; font-weight:400; }}
+  .region.hidden {{ display:none; }}
   .barctl {{ display:flex; gap:14px; align-items:center; margin:18px 0 0;
     font-family:var(--mono); font-size:.7rem; }}
   .barctl button {{ background:none; border:none; color:var(--accent);
@@ -559,6 +581,35 @@ TEMPLATE = r"""<!DOCTYPE html>
       save(dismissed); apply();
     }});
   }});
+
+  // ---- country toggles (World tab)
+  var CK = "morningml_countries_off";
+  function offSet() {{ try {{ return JSON.parse(localStorage.getItem(CK)||"[]"); }} catch(e){{ return []; }} }}
+  function offSave(a) {{ try {{ localStorage.setItem(CK, JSON.stringify(a)); }} catch(e){{}} }}
+  var off = offSet();
+  function applyCountries() {{
+    document.querySelectorAll(".region").forEach(function(r) {{
+      var hide = off.indexOf(r.dataset.region) !== -1;
+      r.classList.toggle("hidden", hide);
+    }});
+    document.querySelectorAll(".chip[data-region]").forEach(function(c) {{
+      c.setAttribute("aria-pressed", String(off.indexOf(c.dataset.region) === -1));
+    }});
+  }}
+  document.querySelectorAll(".chip[data-region]").forEach(function(c) {{
+    c.addEventListener("click", function() {{
+      var r = c.dataset.region, i = off.indexOf(r);
+      if (i === -1) off.push(r); else off.splice(i,1);
+      offSave(off); applyCountries();
+    }});
+  }});
+  var allBtn = document.querySelector(".chip-all"), noneBtn = document.querySelector(".chip-none");
+  if (allBtn) allBtn.addEventListener("click", function() {{ off = []; offSave(off); applyCountries(); }});
+  if (noneBtn) noneBtn.addEventListener("click", function() {{
+    off = []; document.querySelectorAll(".chip[data-region]").forEach(function(c){{ off.push(c.dataset.region); }});
+    offSave(off); applyCountries();
+  }});
+  applyCountries();
 
   var startX=0,startY=0,cur=null,dragging=false;
   document.addEventListener("touchstart", function(e) {{
